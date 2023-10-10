@@ -6,30 +6,26 @@ load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 openai.api_base = os.getenv("OPENAI_API_BASE")
 
-def generate_images(prompt):
+async def generate_images(prompt, num_images=1, furry_model=False):
     model_list = ["sdxl", "sdxl", "sdxl", "stable-diffusion-2.1", "kandinsky-2.2", "stable-diffusion-1.5"]
+    urls = []
     for model in model_list:
         try:
             # Try to generate an image with the current model
-            image_url = openai.Image.create(
+            image_response = openai.Image.create(
                 model=model,
                 prompt=prompt,
-                n=1,  # images count
+                n=num_images,  # images count
                 response_format="url"
             )
             
-            url_string = image_url["data"][0]["url"]
-            print(f"Image generated with model {model}")
-            return url_string, image_url  # Successfully generated image, so return the URL
-        except openai.error.InvalidRequestError or openai.error.PermissionError as e:
+            for entry in image_response["data"]:
+                urls.append(entry["url"])
+            
+            print(f"Images generated with model {model}")
+            return urls, image_response  # Successfully generated images, so return the URLs
+        except (openai.error.InvalidRequestError, openai.error.PermissionError) as e:
             print(f"An error occurred while using model {model}: {str(e)}")
             continue  # Skip to the next iteration and try with the next model
     
     return None, "Unable to generate images with any model"  # Return an error if no models work
-
-
-# result_url, result_data = generate_images("a person holding a sign saying 'Xeniox'")
-# if result_url:
-#     print(f"Image generated: {result_url}")
-# else:
-#     print(f"Error: {result_data}")

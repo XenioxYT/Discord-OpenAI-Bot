@@ -18,7 +18,7 @@ def google_search(search_term, api_key, cse_id, num_results=5, **kwargs):
     ]
 
     # Scraping first 3 URLs
-    for idx, result in enumerate(search_results[:3]):
+    for idx, result in enumerate(search_results[:2]):
         scraped_data = scrape_web_page(result["link"])
         if scraped_data:  # If scraped_data is not None or an error message
             sliced_scraped_data = scraped_data[25:350]  # Skip first 25 characters and limit to 350

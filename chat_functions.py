@@ -1,7 +1,7 @@
 functions = [
     {
         "name": "google_search",
-        "description": "Perform a Google search and return the results in a conversational format.",
+        "description": "Use the 'google_search' tool to retrieve internet search results relevant to your input. The results will return links and snippets of text from the webpages",
         "parameters": {
             "type": "object",
             "properties": {
@@ -12,7 +12,7 @@ functions = [
                 "num_results": {
                     "type": "integer",
                     "enum": [5, 10, 15],
-                    "description": "The number of search results to return. Give the results in a conversational format."
+                    "description": "Number of search results."
                 },
             },
             "required": ["search_term"],
@@ -20,7 +20,7 @@ functions = [
     },
     {
         "name": "scrape_web_page",
-        "description": "Scrapes data from a webpage given a URL. Return it in conversational format.",
+        "description": "Scrape data from a webpage given a URL. Return it in conversational format.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -34,14 +34,19 @@ functions = [
     },
     {
         "name": "generate_image",
-        "description": "Generates an image based on a text prompt that you generate. The prompt should be detailed and limited to 25 words.",
+        "description": "Generate images based on a text prompt. The prompt should be detailed and limited to 25 words. Use when the user asks you to generate, send, give, (and any other synonyms) an image. Craft your input by 'showing' and not 'telling' the imagery.",
         "parameters": {
             "type": "object",
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": "The text prompt based on which the image will be generated."
-                }
+                    "description": "The text prompt based on which the images will be generated. Craft your input by 'showing' and not 'telling' the imagery. Think in terms of what you'd want to see in a photograph or a painting."
+                },
+                "num_images": {
+                    "type": "integer",
+                    "enum": [1, 2, 3, 4],
+                    "description": "Number of images to generate. Maximum 4 images."
+                },
             },
             "required": ["prompt"],
         },

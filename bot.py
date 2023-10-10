@@ -33,7 +33,7 @@ from utils.google_search import google_search
 from utils.scrape_web_page import scrape_web_page
 from utils.store_conversation import store_conversation
 from utils.handle_send_to_discord import update_conversation_and_send_to_discord, send_to_discord, threaded_fetch, generate_response
-# from utils.image_processing import get_detailed_caption
+from utils.image_processing import get_detailed_caption
 from utils.generate_image import generate_images
 from utils.moderate_message import moderate_content
 from utils.check_user_level import check_user_level
@@ -48,12 +48,6 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 openai.api_base = os.getenv("OPENAI_API_BASE")
 google_api_key = os.getenv("GOOGLE_API_KEY")
 google_cse_id = os.getenv("GOOGLE_CSE_ID")
-
-openAI_model = ["gpt-4", "got-3.5-turbo-16k"]
-token_limit = 7000
-
-# Load an encoding for the specific model
-encoding = tiktoken.encoding_for_model("gpt-4")
 
 db_conn = sqlite3.connect('conversations.db')
 db_conn.execute("""
@@ -76,11 +70,7 @@ CREATE TABLE IF NOT EXISTS UserTimezones (
     timezone TEXT
 );
 """)
-
-# Commit the changes
 conn.commit()
-
-# Close the connection
 conn.close()
 
 async def download_image(url, filename):
@@ -114,8 +104,6 @@ class MyClient(discord.Client):
     async def on_message(self, message):
         if message.author == self.user:
             return
-        
-
         # Use create_task to run response generation concurrently
         asyncio.create_task(self.respond_to_message(message))
 
@@ -210,79 +198,89 @@ class MyClient(discord.Client):
 
         conversation = get_conversation(conversation_id)
         if conversation is None:
-            conversation = initialize_conversation(conversation_id, is_dm)
+            conversation = initialize_conversation(conversation_id, is_dm, message.author.id)
 
-        content = moderate_content(message)
-        print(content)
+        if "byte" not in message.content.lower() and not is_dm:
+            content = moderate_content(message)
+        else:
+            content = message.content
 
         new_message = {"role": "user", "content": content.strip()}
         conversation.append(new_message)
         store_conversation(conversation_id, conversation)
 
         # If the conversation exceeds the limit
-        while (count_tokens_in_conversation(conversation)> token_limit):
-            # Check if the earliest message is a system message
-            if conversation[0]["role"] == "system":
-                # If it's a system message, remove and insert it at the second last position
-                system_message = conversation.pop(0)
-                conversation.insert(-1, system_message)
-            else:
-                # If not, just remove the earliest message
-                conversation.pop(0)
-            store_conversation(conversation_id, conversation)
+        # while (count_tokens_in_conversation(conversation)> token_limit):
+        #     # Check if the earliest message is a system message
+        #     if conversation[0]["role"] == "system":
+        #         # If it's a system message, remove and insert it at the second last position
+        #         system_message = conversation.pop(0)
+        #         conversation.insert(-1, system_message)
+        #     else:
+        #         # If not, just remove the earliest message
+        #         conversation.pop(0)
+        #     store_conversation(conversation_id, conversation)
 
         async def edit_message_text(message, content: str):
             await message.edit(content=content)
             
         image_detected = False # Whether an image was detected
         
-        # if message.attachments and message.attachments[0].content_type.startswith("image/"):
-        #     image_detected = True
-        #     image_analysis_message = random.choice(image_analysis_messages)
-        #     temp_message = await message.channel.send(image_analysis_message)
+        if message.attachments and message.attachments[0].content_type.startswith("image/"):
+            image_detected = True
+            image_analysis_message = random.choice(image_analysis_messages)
+            temp_message = await message.channel.send(image_analysis_message)
 
-        #     # Capture user's message text
-        #     user_message_text = message.content if message.content else "No additional text provided."
+            # Capture user's message text
+            user_message_text = message.content if message.content else "No additional text provided."
 
-        #     # Use the new function to get detailed caption and extracted text
-        #     image_url = message.attachments[0].url
-        #     caption = get_detailed_caption(image_url, user_message_text)
-        #     print(f"Caption from img2text: {caption}")
+            # Use the new function to get detailed caption and extracted text
+            image_url = message.attachments[0].url
+            caption = get_detailed_caption(image_url, user_message_text)
+            print(f"Caption from img2text: {caption}")
 
-        #     # Construct the content string with the newly extracted data and user's message
-        #     content = (
-        #         f"{message.author.name} said '{user_message_text}' and sent an image with the contents: '{caption}'. "
-        #         "When given an image caption from a specific source, refrain from disclosing the source or mentioning it in the response. Instead, smoothly integrate the information into your conversational reply as if it was naturally occluded from your analysis of the image."
-        #     )
-        #     print(content)
+            # Construct the content string with the newly extracted data and user's message
+            content = (
+                f"{message.author.name} said '{user_message_text}' and sent an image with the contents: '{caption}'. If the user didn't say anything, describe the image and any deductions you can gain from it to the user. "
+                "When given an image caption from a specific source, refrain from disclosing the source or mentioning it in the response. Instead, smoothly integrate the information into your conversational reply as if it was naturally occluded from your analysis of the image."
+            )
+            print(content)
 
-        #     conversation.append(
-        #         {
-        #             "role": "function",
-        #             "name": "view_image",
-        #             "content": content.strip(),
-        #         }
-        #     )
+            conversation.append(
+                {
+                    "role": "function",
+                    "name": "view_image",
+                    "content": content.strip(),
+                }
+            )
+            store_conversation(conversation_id, conversation)
+            final_response = ""
+            completion = ""
+            try:
+                response = await generate_response(conversation, message, conversation_id)
+            except Exception as e:
+                print(f"Error occurred: {e}")
+                temp_message.delete()
+                return
+            thread_safe_queue = thread_queue.Queue()
+            threading.Thread(target=threaded_fetch, args=(response, thread_safe_queue, completion)).start()
 
-        #     final_response = ""
-        #     completion = ""
-        #     response = generate_response(conversation)
-        #     thread_safe_queue = thread_queue.Queue()
-        #     threading.Thread(target=threaded_fetch, args=(response, thread_safe_queue, completion)).start()
-
-        #     completion, temp_message = await send_to_discord(thread_safe_queue, 50, 2000, 0.3, temp_message, final_response, message)
-        #     conversation.append(
-        #         {
-        #             "role": "assistant",
-        #             "content": completion[:2000],
-        #         }
-        #     )
-        #     store_conversation(conversation_id, conversation)
-        #     completion = re.sub(r'\[([^\]]+)\]\((http[^)]+)\)', r'[\1](<\2>)', completion)
-        #     await temp_message.edit(content=completion)
+            completion, temp_message = await send_to_discord(thread_safe_queue, 50, 2000, 0.3, temp_message, final_response, message)
+            conversation.append(
+                {
+                    "role": "assistant",
+                    "content": completion,
+                }
+            )
+            store_conversation(conversation_id, conversation)
+            await temp_message.edit(content=completion[:2000])
 
         if (("byte" in message.content.lower() or is_dm) and not image_detected):
-            set_bot_busy(conversation_id, True)
+            if is_bot_busy(conversation_id):
+                asyncio.create_task(busy_message(message, "My mind is elsewhere, I'm busy with another task! Please try again after my previous task is done."))
+                return
+            else:
+                set_bot_busy(conversation_id, True)
             typing_indicator = random.choice(typing_indicators)
             temp_message = await message.channel.send(typing_indicator)
             if is_dm:
@@ -290,15 +288,23 @@ class MyClient(discord.Client):
             else:
                 print('\033[94m' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + " - Byte was called in a server by " + message.author.name + '\033[0m')
 
-            response = exponential_backoff(
-                lambda model: openai.ChatCompletion.create(
-                model=model,
-                messages=conversation,
-                functions=functions,
-                stream=True,
-                allow_fallback=True,
-                ),
-            )
+            try:
+                response = await exponential_backoff(
+                    lambda model, latest_conversation: openai.ChatCompletion.create(
+                        model=model,
+                        messages=latest_conversation,
+                        functions=functions,
+                        stream=True,
+                        allow_fallback=False,
+                        premium=True,
+                    ),
+                    conversation_id=conversation_id,
+                    message = message,
+                )
+            except Exception as e:
+                await temp_message.delete()
+                return
+
             thread_safe_queue = thread_queue.Queue()
             final_response = ""
             function_name = None
@@ -310,17 +316,29 @@ class MyClient(discord.Client):
                     regular_response += chunk["choices"][0]["delta"]["content"]
                     thread_safe_queue.put(chunk["choices"][0]["delta"]["content"])
                     threading.Thread(target=threaded_fetch, args=(response, thread_safe_queue, final_response)).start()
-                    completion, temp_message = await send_to_discord(thread_safe_queue, 50, 2000, 0.3, temp_message, final_response, message)
+                    completion, temp_message = await send_to_discord(thread_safe_queue, 75, 2000, 0.3, temp_message, final_response, message)
                     conversation.append(
                         {
                         "role": "assistant",
-                        "content": completion[:2000],
+                        "content": completion,
                         }
                     )
                     store_conversation(conversation_id, conversation)
-                    completion = re.sub(r'\[([^\]]+)\]\((http[^)]+)\)', r'[\1](<\2>)', completion)
+                    # completion = re.sub(r'\[([^\]]+)\]\((http[^)]+)\)', r'[\1](<\2>)', completion)
                     # print(completion)
-                    await temp_message.edit(content=completion[:2000])
+                    try:
+                        await temp_message.edit(content=completion[:2000])
+                    except discord.errors.HTTPException:
+                        print("Failed to edit message. Message too long.")
+                        if len(completion) > 2000:
+                            current_date = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+                            filename = f"response-{conversation_id}-{current_date}.txt"
+                            
+                            async with aiofiles.open(filename, 'w') as file:
+                                await file.write(completion)
+                            with open(filename, 'rb') as file:
+                                await message.channel.send(file=discord.File(file, filename=filename))
+                                print("Sent response to user as a file.")
                     set_bot_busy(conversation_id, False)
                     # print("Final reponse:" + repr(temp_message.content))
                 # check if response is function call
@@ -411,21 +429,40 @@ class MyClient(discord.Client):
             elif (function_name == "generate_image" or function_name == "send_image"):
                 function_arguments = json.loads(function_arguments)
                 prompt = function_arguments.get("prompt")
+                num_images = function_arguments.get("num_images", 1)  # Fetch number of images or set default to 1
+                failed = False
                 temp_message_text = random.choice(image_generation_messages).format(prompt)
                 await edit_message_text(temp_message, temp_message_text)
-                failed = False
+                
                 try:
-                    image_url, _ = generate_images(prompt=prompt)
+                    image_urls, _ = await generate_images(prompt=prompt, num_images=num_images)
+                    print(image_urls)
 
-                    image_filename = f"{conversation_id} + {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}.png"
-                    await download_image(image_url, image_filename)
+                    image_filenames = []  # List to store all downloaded image filenames
+                    image_counter = 0
+
+                    for image_url in image_urls:
+                        image_counter += 1  # Increment the counter for each image
+                        image_filename = f"{conversation_id} + {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_{image_counter}.png"
+                        await download_image(image_url, image_filename)
+                        image_filenames.append(image_filename)
+                    
+                    if num_images == 1:
+                        conversation_message = f"Generated an image with the prompt: {prompt} and sent it to the user. Do not include a url in your response."
+                    else:
+                        conversation_message = f"Generated {num_images} images with the prompt: {prompt} and sent them to the user. Do not include a url in your response."
+
                     conversation.append(
                         {
                             "role": "function",
                             "name": function_name,
-                            "content": "Generated an image with the prompt: " + prompt + " and sent it to the user. Do not include a url in your response.",
+                            "content": conversation_message,
                         }
                     )
+
+                    # Send all images together in one message
+                    # await temp_message.channel.send(files=[discord.File(filename) for filename in image_filenames])
+                
                 except openai.error.APIError as e:
                     error_message = str(e)
                     await edit_message_text(
@@ -445,7 +482,12 @@ class MyClient(discord.Client):
                 store_conversation(conversation_id, conversation)
                 final_response = ""
                 completion = ""
-                response = generate_response(conversation)
+                try:
+                    response = await generate_response(conversation, message, conversation_id)
+                except Exception as e:
+                    print(f"Error occurred: {e}")
+                    await temp_message.delete()
+                    return
 
                 thread_safe_queue = thread_queue.Queue()
                 threading.Thread(target=threaded_fetch, args=(response, thread_safe_queue, completion)).start()
@@ -454,15 +496,22 @@ class MyClient(discord.Client):
                 conversation.append(
                     {
                         "role": "assistant",
-                        "content": completion[:2000],
+                        "content": completion,
                     }
                 )
                 store_conversation(conversation_id, conversation)
-                completion = re.sub(r'\[([^\]]+)\]\((http[^)]+)\)', r'[\1](<\2>)', completion)
+                # completion = re.sub(r'\[([^\]]+)\]\((http[^)]+)\)', r'[\1](<\2>)', completion)
                 await temp_message.edit(content=completion)
                 if not failed:
-                    await temp_message.channel.send(file=discord.File(image_filename))
+                    await temp_message.channel.send(files=[discord.File(filename) for filename in image_filenames])
                 set_bot_busy(conversation_id, False)
+                # Delete the image files
+                for filename in image_filenames:
+                    try:
+                        os.remove(filename)
+                    except Exception as e:
+                        print(f"Error deleting file {filename}: {str(e)}")
+
 
     async def on_disconnect(self):
         self.change_status_task.cancel()

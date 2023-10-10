@@ -59,12 +59,42 @@ from azure.cognitiveservices.vision.computervision import ComputerVisionClient
 from azure.cognitiveservices.vision.computervision.models import VisualFeatureTypes
 from msrest.authentication import CognitiveServicesCredentials
 
+from PIL import Image
+import requests
+from io import BytesIO
+
+def compress_image(img_url, max_size_bytes):
+    # Fetch the image
+    response = requests.get(img_url)
+    image = Image.open(BytesIO(response.content))
+
+    # If the image has an alpha (transparency) channel, convert it to RGB
+    if image.mode == "RGBA":
+        image = image.convert("RGB")
+    
+    # Save the image in a buffer using JPEG to compress
+    buffer = BytesIO()
+    quality = 95
+    while True:
+        buffer.seek(0)
+        image.save(buffer, "JPEG", quality=quality)
+        if buffer.tell() <= max_size_bytes or quality <= 10:
+            break
+        quality -= 5
+
+    buffer.seek(0)
+    return buffer
+
+
 def azure_vision_analysis(image_url):
     key = os.getenv("AZURE_VISION_KEY")
     endpoint = os.getenv("AZURE_VISION_ENDPOINT")
+    max_size_bytes = 4 * 1024 * 1024  # 8MB
     
+    # Compress the image if it exceeds the max size
+    compressed_image = compress_image(image_url, max_size_bytes)
+
     computervision_client = ComputerVisionClient(endpoint, CognitiveServicesCredentials(key))
-    
     features = [
         VisualFeatureTypes.image_type,
         VisualFeatureTypes.faces,
@@ -74,7 +104,7 @@ def azure_vision_analysis(image_url):
         VisualFeatureTypes.description,
     ]
     
-    analysis = computervision_client.analyze_image(image_url, visual_features=features)
+    analysis = computervision_client.analyze_image_in_stream(compressed_image, visual_features=features)
 
     results = {
         "description": analysis.description.captions[0].text if analysis.description.captions else "",
